@@ -1,29 +1,11 @@
-# packet_sniffer/main.py — Gelişmiş Ağ Paket Sniffer
-# MicroPython | STM32 Hand Terminal
-#
-# Çalıştırma: mpremote run packet_sniffer/main.py
-#             Thonny → Run
-#
-# Özellikler:
-#   - IPv4 / TCP / UDP / ICMP / ARP parse
-#   - HTTP derin parse (method, path, host, user-agent, cookie, body)
-#   - DNS sorgu + yanıt parse
-#   - Passive OS Fingerprinting (TTL + TCP window → OS tahmini)
-#   - ARP Spoofing tespiti
-#   - SYN Scan / Port Tarama tespiti
-#   - ICMP tip analizi (ping, unreachable, redirect, traceroute)
-#   - Flow Tracker (aktif TCP bağlantıları)
-#   - Top Talkers (en çok trafik yapan IP'ler)
-#   - Kural tabanlı Alert sistemi
-#   - Payload hex/ASCII önizlemesi
-#   - CSV loglama
+# packet_sniffer 
 
 import usocket
 import uselect
 import ustruct
 import utime
 
-# ── Sabitler ──────────────────────────────────────────────────
+# ── sabitler burada babuş 
 
 IP_PROTO_ICMP = 1
 IP_PROTO_TCP  = 6
@@ -54,12 +36,9 @@ PORT_NAMES = {
 FILTERS = ['ALL', 'TCP', 'UDP', 'ICMP', 'ARP', 'HTTP', 'DNS', 'ALERT']
 
 SNIFF_LOG_PATH = '/sniff.log'
-SNIFF_BUF_SIZE = 4096   # büyütüldü: body yakalamak için
-
-# ── OS Fingerprint tablosu (TTL, TCP window → OS) ─────────────
-# Format: (ttl_eşik, window_boyutu_aralığı) → OS ismi
+SNIFF_BUF_SIZE = 4096   
 _OS_FINGERPRINTS = [
-    # (min_ttl, max_ttl, win_lo, win_hi, os_name)
+    # (min_ttl, max_ttl, win_lo, win_hi, os_name) hazır tablo burası 
     (  1,  64,  5840,  5840, 'Linux 2.4/2.6'),
     (  1,  64, 65535, 65535, 'Linux 3.x/4.x'),
     (  1,  64, 29200, 29200, 'Linux 5.x'),
@@ -73,7 +52,7 @@ _OS_FINGERPRINTS = [
 ]
 
 def os_fingerprint(ttl, window):
-    """TTL ve TCP window size'a göre OS tahmini yapar."""
+    
     for mn, mx, wlo, whi, name in _OS_FINGERPRINTS:
         if mn <= ttl <= mx and wlo <= window <= whi:
             return name
@@ -82,7 +61,7 @@ def os_fingerprint(ttl, window):
     return 'Unknown (TTL={})'.format(ttl)
 
 
-# ── Yardımcılar ───────────────────────────────────────────────
+# ── yarak gibi convert 
 
 def _ip(b):    return '{}.{}.{}.{}'.format(b[0], b[1], b[2], b[3])
 def _mac(b):   return '{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}'.format(*b)
@@ -90,7 +69,7 @@ def _port(p):  return PORT_NAMES.get(p, str(p))
 def _flags(f): return '|'.join(n for b, n in TCP_FLAG_BITS.items() if f & b) or '-'
 
 def _hex_preview(data, n=16):
-    """İlk n byte'ı hem hex hem ASCII olarak verir."""
+    
     chunk = data[:n]
     hex_s = ' '.join('{:02X}'.format(b) for b in chunk)
     asc_s = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
@@ -104,7 +83,7 @@ def _log(line):
         pass
 
 
-# ── Parser'lar ────────────────────────────────────────────────
+# ── Parsers
 
 def parse_ipv4(raw):
     if len(raw) < 20 or (raw[0] >> 4) != 4:
@@ -174,10 +153,10 @@ def parse_arp(raw):
     }
 
 
-# ── Protokol sniffer'ları ─────────────────────────────────────
+# ── Protokol sniffer 
 
 def sniff_http(payload):
-    """HTTP header'larını bir dict halinde ayıklar."""
+    
     try:
         text   = payload.decode('utf-8', 'ignore')
         lines  = text.split('\r\n')
@@ -198,7 +177,7 @@ def sniff_http(payload):
             result['response'] = first
             result['status']   = parts[1] if len(parts) > 1 else ''
 
-        # Header'lar
+        # Headers
         for line in lines[1:]:
             if ':' in line:
                 k, _, v = line.partition(':')
@@ -215,7 +194,7 @@ def sniff_http(payload):
         return None
 
 def sniff_dns(payload):
-    """DNS paketini parse eder: sorgu + yanıt."""
+    """DNS paketini siker """
     try:
         if len(payload) < 12:
             return None
@@ -257,7 +236,7 @@ def sniff_dns(payload):
         return None
 
 
-# ── Flow Tracker ─────────────────────────────────────────────
+# ── Flow Tracker 
 
 class FlowTracker:
     """
@@ -321,10 +300,10 @@ class FlowTracker:
                       key=lambda x: -x[1]['bytes'])[:n]
 
 
-# ── Top Talkers ───────────────────────────────────────────────
+# ── Top Talkers 
 
 class TopTalkers:
-    """En çok trafik yapan IP'leri takip eder (src + dst)."""
+    """"""
 
     def __init__(self, max_entries=64):
         self.tx    = {}   # ip → gönderilen byte
@@ -822,3 +801,233 @@ if __name__ == '__main__':
 
     print('\n[*] Ready. Call start() after WiFi connect for live capture.')
     print('    pkt = sniffer.next_packet()  →  dict to your UI layer')
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  ESP32 UART Sniffer — STM32 tarafı
+#
+#  ESP32'nin sniffer_tools.cpp'den gönderdiği parsed paket satırlarını
+#  UART üzerinden okur ve aynı next_packet() → dict API'ını sunar.
+#
+#  Kullanım:
+#      from packet_sniffer.main import ESP32UARTSniffer
+#      sniffer = ESP32UARTSniffer(uart_id=3, tx_pin='PD8', rx_pin='PD9')
+#      sniffer.start()
+#      while True:
+#          pkt = sniffer.next_packet()
+#          if pkt:
+#              # ekrana bas, UI'a gönder vs.
+# ═══════════════════════════════════════════════════════════════════
+
+class ESP32UARTSniffer:
+    """
+    ESP32 üzerinden UART ile gelen parsed paketleri okur.
+
+    ESP32 formatı:
+      [PKT] proto|src_ip:port|dst_ip:port|flags|TTLn|info|!alert
+      [STATS] total:N|tcp:N|udp:N|...
+      [FLOW]  src:port>dst:port|state|pkts:N|bytes:N
+      [TALK]  ip|pkts:N|bytes:N
+      [ALRT]  [LEVEL] message
+    """
+
+    FILTERS = ['ALL', 'TCP', 'UDP', 'ICMP', 'ARP', 'HTTP', 'DNS', 'ALERT']
+
+    def __init__(self, uart_id=3, tx_pin='PD8', rx_pin='PD9', baud=115200):
+        from machine import UART, Pin
+        self.uart = UART(uart_id, baud)
+        self.uart.init(baud, bits=8, parity=None, stop=1,
+                       tx=Pin(tx_pin), rx=Pin(rx_pin),
+                       rxbuf=1024)
+        self.filter_idx = 0
+        self.stats = {}
+        self.last_flows = []
+        self.last_talkers = []
+        self.last_alerts = []
+        self._running = False
+
+    # ── Kontrol komutları (STM32 → ESP32) ────────────────────────
+    def _send(self, cmd):
+        self.uart.write(cmd + '\n')
+
+    def start(self):
+        self._send('CMD:SNIFFER_START')
+        self._running = True
+
+    def stop(self):
+        self._send('CMD:SNIFFER_STOP')
+        self._running = False
+
+    def next_filter(self):
+        self._send('CMD:SNIFFER_FILTER')
+        self.filter_idx = (self.filter_idx + 1) % len(self.FILTERS)
+        return self.FILTERS[self.filter_idx]
+
+    def set_filter(self, idx):
+        self._send('CMD:SNIFFER_FILTER:{}'.format(idx))
+        self.filter_idx = idx
+
+    def current_filter(self):
+        return self.FILTERS[self.filter_idx]
+
+    def request_stats(self):
+        self._send('CMD:SNIFFER_STATS')
+
+    def request_flows(self):
+        self._send('CMD:SNIFFER_FLOWS')
+
+    def request_talkers(self):
+        self._send('CMD:SNIFFER_TALKERS')
+
+    def request_alerts(self):
+        self._send('CMD:SNIFFER_ALERTS')
+
+    # ── Paket okuma ──────────────────────────────────────────────
+    def next_packet(self):
+        """
+        UART'tan bir satır okur, parse edip dict döner.
+        Paket yoksa None döner.
+
+        Dönen dict (PacketSniffer ile aynı API):
+        {
+          'ts', 'proto', 'src_ip', 'dst_ip', 'src_port', 'dst_port',
+          'flags', 'ttl', 'info', 'alert', 'raw_len'
+        }
+        """
+        if not self.uart.any():
+            return None
+
+        line = self.uart.readline()
+        if not line:
+            return None
+
+        try:
+            text = line.decode('utf-8', 'ignore').strip()
+        except Exception:
+            return None
+
+        if not text:
+            return None
+
+        # ── [PKT] parsed paket ───────────────────────────────────
+        if text.startswith('[PKT] '):
+            return self._parse_pkt(text[6:])
+
+        # ── [STATS] istatistik ───────────────────────────────────
+        elif text.startswith('[STATS] '):
+            self._parse_stats(text[8:])
+
+        # ── [FLOW] flow bilgisi ──────────────────────────────────
+        elif text.startswith('[FLOW] '):
+            self._parse_flow(text[7:])
+
+        # ── [FLOWS] flow header ──────────────────────────────────
+        elif text.startswith('[FLOWS] '):
+            self.last_flows = []
+
+        # ── [TALK] talker bilgisi ────────────────────────────────
+        elif text.startswith('[TALK] '):
+            self._parse_talker(text[7:])
+
+        # ── [TALKERS] talker header ──────────────────────────────
+        elif text.startswith('[TALKERS] '):
+            self.last_talkers = []
+
+        # ── [ALRT] alert bilgisi ─────────────────────────────────
+        elif text.startswith('[ALRT] '):
+            self.last_alerts.append(text[7:])
+            if len(self.last_alerts) > 20:
+                self.last_alerts.pop(0)
+
+        # ── [ALERTS] alert header ────────────────────────────────
+        elif text.startswith('[ALERTS] '):
+            self.last_alerts = []
+
+        return None
+
+    def _parse_pkt(self, data):
+        """[PKT] proto|src_ip:port|dst_ip:port|flags|TTLn|info[|!alert]"""
+        parts = data.split('|')
+        if len(parts) < 4:
+            return None
+
+        pkt = {
+            'ts': utime.ticks_ms(),
+            'proto': parts[0],
+            'src_ip': '', 'dst_ip': '',
+            'src_port': 0, 'dst_port': 0,
+            'flags': '', 'ttl': 0, 'info': '',
+            'alert': None, 'raw_len': 0,
+        }
+
+        # src_ip:port
+        src = parts[1]
+        if ':' in src:
+            ip, _, port = src.rpartition(':')
+            pkt['src_ip'] = ip
+            try: pkt['src_port'] = int(port)
+            except: pass
+        else:
+            pkt['src_ip'] = src
+
+        # dst_ip:port
+        dst = parts[2]
+        if ':' in dst:
+            ip, _, port = dst.rpartition(':')
+            pkt['dst_ip'] = ip
+            try: pkt['dst_port'] = int(port)
+            except: pass
+        else:
+            pkt['dst_ip'] = dst
+
+        # flags
+        if len(parts) > 3:
+            pkt['flags'] = parts[3]
+
+        # TTL
+        if len(parts) > 4:
+            ttl_str = parts[4]
+            if ttl_str.startswith('TTL'):
+                try: pkt['ttl'] = int(ttl_str[3:])
+                except: pass
+
+        # info
+        if len(parts) > 5:
+            pkt['info'] = parts[5]
+
+        # alert (! ile başlar)
+        for p in parts:
+            if p.startswith('!'):
+                pkt['alert'] = p[1:]
+                break
+
+        return pkt
+
+    def _parse_stats(self, data):
+        """total:N|tcp:N|udp:N|..."""
+        self.stats = {}
+        for item in data.split('|'):
+            if ':' in item:
+                k, _, v = item.partition(':')
+                try: self.stats[k] = int(v)
+                except: self.stats[k] = v
+
+    def _parse_flow(self, data):
+        """src:port>dst:port|state|pkts:N|bytes:N"""
+        self.last_flows.append(data)
+
+    def _parse_talker(self, data):
+        """ip|pkts:N|bytes:N"""
+        self.last_talkers.append(data)
+
+    def get_stats(self):
+        return self.stats
+
+    def get_flows(self):
+        return self.last_flows
+
+    def get_talkers(self):
+        return self.last_talkers
+
+    def get_alerts(self):
+        return self.last_alerts
